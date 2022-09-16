@@ -1,19 +1,12 @@
 #ifndef HSSINFO_HSSINFO_HPP
 #define HSSINFO_HSSINFO_HPP
 
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include <thrust/device_ptr.h>
-#include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
-#include <thrust/mr/allocator.h>
-#include <thrust/mr/memory_resource.h>
-#include <thrust/mr/new.h>
-#include <thrust/mr/pool.h>
-
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+
+#include "thrust/device_vector.h"
+#include "thrust/host_vector.h"
 
 struct printf_functor_int {
   __host__ __device__ void operator()(int x) { printf("%d ", x); }
@@ -49,18 +42,14 @@ struct isFinished {
 template <typename T>
 struct entropy_delta_functor : public thrust::unary_function<thrust::tuple<T, T, T, T, T, T, T, T>, T> {
   __host__ __device__ T operator()(thrust::tuple<T, T, T, T, T, T, T, T> input) {
-    T entropy = (thrust::get<1>(input) * log2f(thrust::get<0>(input)) + thrust::get<3>(input) * log2f(thrust::get<2>(input)) - thrust::get<5>(input) * log2f(thrust::get<4>(input)) +
-                 thrust::get<7>(input) * log2f(thrust::get<6>(input))) /
+    T entropy = (thrust::get<1>(input) * log2f(thrust::get<0>(input)) + thrust::get<3>(input) * log2f(thrust::get<2>(input)) -
+                 thrust::get<5>(input) * log2f(thrust::get<4>(input)) + thrust::get<7>(input) * log2f(thrust::get<6>(input))) /
                 thrust::get<6>(input);
     return entropy;
   }
 };
 
 class HSSInfo {
-private:
-  cudaStream_t stream{};
-  cudaMemPool_t memPool{};
-
 public:
   int nodes;
   int edges;
@@ -125,33 +114,6 @@ public:
   template <typename T, typename InputIterator, typename OutputIterator>
   void merge_cmty(InputIterator key1_first, InputIterator key1_end, InputIterator key2_first, InputIterator key2_end, InputIterator map1_first, InputIterator map2_first,
                   OutputIterator result_map_first);
-
-  template <typename T>
-  thrust::device_ptr<T> mallocAsyncThrust(size_t n) {
-    T *raw_ptr;
-    cudaMallocFromPoolAsync(&raw_ptr, n * sizeof(T), this->memPool, this->stream);
-    // cudaMallocManaged(&raw_ptr, n * sizeof(T));
-    // cudaMalloc(&raw_ptr, n * sizeof(T));
-
-    return thrust::device_pointer_cast(raw_ptr);
-  }
-
-  template <typename T>
-  thrust::device_ptr<T> mallocAsyncThrust(size_t n, T value) {
-    T *raw_ptr;
-    cudaMallocFromPoolAsync(&raw_ptr, n * sizeof(T), this->memPool, this->stream);
-    // cudaMallocManaged(&raw_ptr, n * sizeof(T));
-    // cudaMalloc(&raw_ptr, n * sizeof(T));
-    thrust::device_ptr<T> d_ptr = thrust::device_pointer_cast(raw_ptr);
-    thrust::fill(d_ptr, d_ptr + n, value);
-    return d_ptr;
-  }
-
-  template <typename T>
-  void freeAsyncThrust(thrust::device_ptr<T> pointer) {
-    cudaFreeAsync(thrust::raw_pointer_cast(pointer), this->stream);
-    // cudaFree(thrust::raw_pointer_cast(pointer));
-  }
 
   void printf_detail();
   template <typename InputIterator>

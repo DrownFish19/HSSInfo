@@ -1,9 +1,9 @@
+#include "hssinfo.hpp"
+
 #include <sys/time.h>
 #include <thrust/count.h>
 #include <thrust/device_delete.h>
 #include <thrust/device_free.h>
-#include <thrust/device_malloc.h>
-#include <thrust/device_reference.h>
 #include <thrust/execution_policy.h>
 #include <thrust/extrema.h>
 #include <thrust/gather.h>
@@ -13,11 +13,8 @@
 
 #include <algorithm>
 #include <fstream>
-
-#include "hssinfo.hpp"
 //#define debug
 HSSInfo::HSSInfo(const int &nodes, const std::string &filename) : nodes(nodes) {
-  /**********  初始化数据，使用host方法进行读取数据   *************/
   std::vector<int> rows;
   std::vector<int> cols;
   std::vector<int> weights;
@@ -65,21 +62,11 @@ HSSInfo::HSSInfo(const int &nodes, const std::string &filename) : nodes(nodes) {
   }
   in.close();
   std::cout << std::endl << "read finish" << std::endl;
-  /**********  初始化数据读取完成  *************/
-
-  /************  初始化 cuda stream 和 内存池  ****************/
-  cudaSetDevice(0);
-  cudaStreamCreateWithFlags(&this->stream, cudaStreamNonBlocking); //设置stream
-  cudaDeviceGetDefaultMemPool(&this->memPool, 0);                  //设置内存池
-  uint64_t thresholdVal = UINT64_MAX;                              //为内存池设置阈值，可以减少内存的申请与释放操作
-  cudaMemPoolSetAttribute(this->memPool, cudaMemPoolAttrReleaseThreshold, (void *) &thresholdVal);
-  /************  初始化 cuda stream 和 内存池 完成  ****************/
 
   this->edges = count;
 
   this->h_community.resize(this->nodes);
   for (int idx = 0; idx < this->nodes; idx++) { this->h_community[idx].push_back(idx); }
-
   this->d_comity_label.resize(this->nodes);
   thrust::host_vector<int> h_comity_label;
   h_comity_label.resize(this->nodes);
@@ -99,13 +86,17 @@ HSSInfo::HSSInfo(const int &nodes, const std::string &filename) : nodes(nodes) {
   this->d_degree_module.resize(this->edges, 0);
   this->d_entropy_delta.resize(this->edges, 0.0);
 
+  this->h_degree1.resize(this->edges, 0);
+  this->h_degree2.resize(this->edges, 0);
+  this->h_loop1.resize(this->edges, 0);
+  this->h_loop2.resize(this->edges, 0);
+
   this->d_src_idx.insert(this->d_src_idx.begin(), rows.begin(), rows.end());
   this->d_tgt_idx.insert(this->d_tgt_idx.begin(), cols.begin(), cols.end());
   this->d_weights.insert(this->d_weights.begin(), weights.begin(), weights.end());
 
   this->h_src_locs.resize(this->nodes);
   this->h_tgt_locs.resize(this->nodes);
-
   for (int idx = 0; idx < this->nodes; idx++) {
     this->h_src_locs[idx] = thrust::host_vector<int>(src_locs[idx].begin(), src_locs[idx].end());
     this->h_tgt_locs[idx] = thrust::host_vector<int>(tgt_locs[idx].begin(), tgt_locs[idx].end());
@@ -135,10 +126,10 @@ HSSInfo::HSSInfo(const int &nodes, const std::string &filename) : nodes(nodes) {
 
   thrust::device_vector<int> d_degree_sum_vec(this->d_loop_module.size(), this->degree_sum);
 
-  thrust::transform(thrust::make_zip_iterator(thrust::make_tuple(this->d_degree1.begin(), this->d_loop1.begin(), this->d_degree2.begin(), this->d_loop2.begin(), this->d_degree_module.begin(),
-                                                                 this->d_loop_module.begin(), d_degree_sum_vec.begin(), this->d_connect.begin())),
-                    thrust::make_zip_iterator(thrust::make_tuple(this->d_degree1.end(), this->d_loop1.end(), this->d_degree2.end(), this->d_loop2.end(), this->d_degree_module.end(),
-                                                                 this->d_loop_module.end(), d_degree_sum_vec.end(), this->d_connect.end())),
+  thrust::transform(thrust::make_zip_iterator(thrust::make_tuple(this->d_degree1.begin(), this->d_loop1.begin(), this->d_degree2.begin(), this->d_loop2.begin(),
+                                                                 this->d_degree_module.begin(), this->d_loop_module.begin(), d_degree_sum_vec.begin(), this->d_connect.begin())),
+                    thrust::make_zip_iterator(thrust::make_tuple(this->d_degree1.end(), this->d_loop1.end(), this->d_degree2.end(), this->d_loop2.end(),
+                                                                 this->d_degree_module.end(), this->d_loop_module.end(), d_degree_sum_vec.end(), this->d_connect.end())),
                     this->d_entropy_delta.begin(), entropy_delta_functor<float>());
 
   thrust::device_vector<int> finish_zero(this->edges, 0);
@@ -175,11 +166,11 @@ void HSSInfo::Update(const T &update_idx) {
   this->d_finished[update_idx]      = THRUST_TRUE;
   this->bar += 1;
 
-  T node1 = this->d_src_idx[update_idx];
-  T node2 = this->d_tgt_idx[update_idx];
+  int node1 = this->d_src_idx[update_idx];
+  int node2 = this->d_tgt_idx[update_idx];
 
-  T comity1 = this->d_comity_label[node1];
-  T comity2 = this->d_comity_label[node2];
+  int comity1 = this->d_comity_label[node1];
+  int comity2 = this->d_comity_label[node2];
 
   //  std::cout << comity1 << " " << comity2 << std::endl;
 
@@ -187,136 +178,130 @@ void HSSInfo::Update(const T &update_idx) {
   this->changed.shrink_to_fit();
 
   //当前m1和m2所有的locs位置 (此处需要判断是否已经finished)
-  T src_m1_len = this->h_src_locs[comity1].size();
-  T tgt_m1_len = this->h_tgt_locs[comity1].size();
-  T src_m2_len = this->h_src_locs[comity2].size();
-  T tgt_m2_len = this->h_tgt_locs[comity2].size();
   thrust::device_vector<T> d_locs_src_all_m1(this->h_src_locs[comity1].begin(), this->h_src_locs[comity1].end());
   thrust::device_vector<T> d_locs_tgt_all_m1(this->h_tgt_locs[comity1].begin(), this->h_tgt_locs[comity1].end());
   thrust::device_vector<T> d_locs_src_all_m2(this->h_src_locs[comity2].begin(), this->h_src_locs[comity2].end());
   thrust::device_vector<T> d_locs_tgt_all_m2(this->h_tgt_locs[comity2].begin(), this->h_tgt_locs[comity2].end());
 
-  thrust::device_ptr<T> d_locs_src_m1_ptr = this->mallocAsyncThrust<T>(src_m1_len);
-  thrust::device_ptr<T> d_locs_tgt_m1_ptr = this->mallocAsyncThrust<T>(tgt_m1_len);
-  thrust::device_ptr<T> d_locs_src_m2_ptr = this->mallocAsyncThrust<T>(src_m2_len);
-  thrust::device_ptr<T> d_locs_tgt_m2_ptr = this->mallocAsyncThrust<T>(tgt_m2_len);
-  src_m1_len                              = this->gather_unfinished<T>(d_locs_src_all_m1.begin(), d_locs_src_all_m1.end(), d_locs_src_m1_ptr);
-  tgt_m1_len                              = this->gather_unfinished<T>(d_locs_tgt_all_m1.begin(), d_locs_tgt_all_m1.end(), d_locs_tgt_m1_ptr);
-  src_m2_len                              = this->gather_unfinished<T>(d_locs_src_all_m2.begin(), d_locs_src_all_m2.end(), d_locs_src_m2_ptr);
-  tgt_m2_len                              = this->gather_unfinished<T>(d_locs_tgt_all_m2.begin(), d_locs_tgt_all_m2.end(), d_locs_tgt_m2_ptr);
+  thrust::device_vector<T> d_locs_src_m1(d_locs_src_all_m1.size());
+  thrust::device_vector<T> d_locs_tgt_m1(d_locs_tgt_all_m1.size());
+  thrust::device_vector<T> d_locs_src_m2(d_locs_src_all_m2.size());
+  thrust::device_vector<T> d_locs_tgt_m2(d_locs_tgt_all_m2.size());
+  T src_m1_len = this->gather_unfinished<T>(d_locs_src_all_m1.begin(), d_locs_src_all_m1.end(), d_locs_src_m1.begin());
+  T tgt_m1_len = this->gather_unfinished<T>(d_locs_tgt_all_m1.begin(), d_locs_tgt_all_m1.end(), d_locs_tgt_m1.begin());
+  T src_m2_len = this->gather_unfinished<T>(d_locs_src_all_m2.begin(), d_locs_src_all_m2.end(), d_locs_src_m2.begin());
+  T tgt_m2_len = this->gather_unfinished<T>(d_locs_tgt_all_m2.begin(), d_locs_tgt_all_m2.end(), d_locs_tgt_m2.begin());
 
-  thrust::device_ptr<T> d_idxs_tgt_m1_ptr = this->mallocAsyncThrust<T>(src_m1_len);
-  thrust::device_ptr<T> d_idxs_src_m1_ptr = this->mallocAsyncThrust<T>(tgt_m1_len);
-  thrust::device_ptr<T> d_idxs_tgt_m2_ptr = this->mallocAsyncThrust<T>(src_m2_len);
-  thrust::device_ptr<T> d_idxs_src_m2_ptr = this->mallocAsyncThrust<T>(tgt_m2_len);
-  this->gather_idxs<T>(d_locs_src_m1_ptr, d_locs_src_m1_ptr + src_m1_len, 0, d_idxs_tgt_m1_ptr);
-  this->gather_idxs<T>(d_locs_tgt_m1_ptr, d_locs_tgt_m1_ptr + tgt_m1_len, 1, d_idxs_src_m1_ptr);
-  this->gather_idxs<T>(d_locs_src_m2_ptr, d_locs_src_m2_ptr + src_m2_len, 0, d_idxs_tgt_m2_ptr);
-  this->gather_idxs<T>(d_locs_tgt_m2_ptr, d_locs_tgt_m2_ptr + tgt_m2_len, 1, d_idxs_src_m2_ptr);
+  thrust::device_vector<T> d_idxs_tgt_m1(src_m1_len);
+  thrust::device_vector<T> d_idxs_src_m1(tgt_m1_len);
+  thrust::device_vector<T> d_idxs_tgt_m2(src_m2_len);
+  thrust::device_vector<T> d_idxs_src_m2(tgt_m2_len);
+  this->gather_idxs<T>(d_locs_src_m1.begin(), d_locs_src_m1.begin() + src_m1_len, 0, d_idxs_tgt_m1.begin());
+  this->gather_idxs<T>(d_locs_tgt_m1.begin(), d_locs_tgt_m1.begin() + tgt_m1_len, 1, d_idxs_src_m1.begin());
+  this->gather_idxs<T>(d_locs_src_m2.begin(), d_locs_src_m2.begin() + src_m2_len, 0, d_idxs_tgt_m2.begin());
+  this->gather_idxs<T>(d_locs_tgt_m2.begin(), d_locs_tgt_m2.begin() + tgt_m2_len, 1, d_idxs_src_m2.begin());
 
-  thrust::device_ptr<T> d_comity_tgt_m1_ptr = this->mallocAsyncThrust<T>(src_m1_len);
-  thrust::device_ptr<T> d_comity_src_m1_ptr = this->mallocAsyncThrust<T>(tgt_m1_len);
-  thrust::device_ptr<T> d_comity_tgt_m2_ptr = this->mallocAsyncThrust<T>(src_m2_len);
-  thrust::device_ptr<T> d_comity_src_m2_ptr = this->mallocAsyncThrust<T>(tgt_m2_len);
-  this->gather_cmty<T>(d_idxs_tgt_m1_ptr, d_idxs_tgt_m1_ptr + src_m1_len, d_comity_tgt_m1_ptr);
-  this->gather_cmty<T>(d_idxs_src_m1_ptr, d_idxs_src_m1_ptr + tgt_m1_len, d_comity_src_m1_ptr);
-  this->gather_cmty<T>(d_idxs_tgt_m2_ptr, d_idxs_tgt_m2_ptr + src_m2_len, d_comity_tgt_m2_ptr);
-  this->gather_cmty<T>(d_idxs_src_m2_ptr, d_idxs_src_m2_ptr + tgt_m2_len, d_comity_src_m2_ptr);
+  thrust::device_vector<T> d_comity_tgt_m1(src_m1_len);
+  thrust::device_vector<T> d_comity_src_m1(tgt_m1_len);
+  thrust::device_vector<T> d_comity_tgt_m2(src_m2_len);
+  thrust::device_vector<T> d_comity_src_m2(tgt_m2_len);
+  this->gather_cmty<T>(d_idxs_tgt_m1.begin(), d_idxs_tgt_m1.end(), d_comity_tgt_m1.begin());
+  this->gather_cmty<T>(d_idxs_src_m1.begin(), d_idxs_src_m1.end(), d_comity_src_m1.begin());
+  this->gather_cmty<T>(d_idxs_tgt_m2.begin(), d_idxs_tgt_m2.end(), d_comity_tgt_m2.begin());
+  this->gather_cmty<T>(d_idxs_src_m2.begin(), d_idxs_src_m2.end(), d_comity_src_m2.begin());
 
-  thrust::sort_by_key(thrust::device, d_comity_tgt_m1_ptr, d_comity_tgt_m1_ptr + src_m1_len, d_locs_src_m1_ptr); //sorted
-  thrust::sort_by_key(thrust::device, d_comity_src_m1_ptr, d_comity_src_m1_ptr + tgt_m1_len, d_locs_tgt_m1_ptr); //sorted
-  thrust::sort_by_key(thrust::device, d_comity_tgt_m2_ptr, d_comity_tgt_m2_ptr + src_m2_len, d_locs_src_m2_ptr); //sorted
-  thrust::sort_by_key(thrust::device, d_comity_src_m2_ptr, d_comity_src_m2_ptr + tgt_m2_len, d_locs_tgt_m2_ptr); //sorted
+  thrust::sort_by_key(thrust::device, d_comity_tgt_m1.begin(), d_comity_tgt_m1.end(), d_locs_src_m1.begin()); //sorted
+  thrust::sort_by_key(thrust::device, d_comity_src_m1.begin(), d_comity_src_m1.end(), d_locs_tgt_m1.begin()); //sorted
+  thrust::sort_by_key(thrust::device, d_comity_tgt_m2.begin(), d_comity_tgt_m2.end(), d_locs_src_m2.begin()); //sorted
+  thrust::sort_by_key(thrust::device, d_comity_src_m2.begin(), d_comity_src_m2.end(), d_locs_tgt_m2.begin()); //sorted
 
-  thrust::device_ptr<T> d_locs_m1_ptr   = this->mallocAsyncThrust<T>(src_m1_len + tgt_m1_len);
-  thrust::device_ptr<T> d_comity_m1_ptr = this->mallocAsyncThrust<T>(src_m1_len + tgt_m1_len);
-  thrust::device_ptr<T> d_locs_m2_ptr   = this->mallocAsyncThrust<T>(src_m2_len + tgt_m2_len);
-  thrust::device_ptr<T> d_comity_m2_ptr = this->mallocAsyncThrust<T>(src_m2_len + tgt_m2_len);
+  thrust::device_vector<T> d_locs_m1(d_comity_tgt_m1.size() + d_comity_src_m1.size());
+  thrust::device_vector<T> d_comity_m1(d_comity_tgt_m1.size() + d_comity_src_m1.size());
 
-  T len_m1 = this->merge_cmty_self<T>(d_comity_tgt_m1_ptr, d_comity_tgt_m1_ptr + src_m1_len, d_comity_src_m1_ptr, d_comity_src_m1_ptr + tgt_m1_len, d_locs_src_m1_ptr, d_locs_tgt_m1_ptr,
-                                      d_comity_m1_ptr, d_locs_m1_ptr);
-  T len_m2 = this->merge_cmty_self<T>(d_comity_tgt_m2_ptr, d_comity_tgt_m2_ptr + src_m2_len, d_comity_src_m2_ptr, d_comity_src_m2_ptr + tgt_m2_len, d_locs_src_m2_ptr, d_locs_tgt_m2_ptr,
-                                      d_comity_m2_ptr, d_locs_m2_ptr);
-  this->cmty_intersection<T>(d_comity_m1_ptr, d_comity_m1_ptr + len_m1, d_comity_m2_ptr, d_comity_m2_ptr + len_m2, d_locs_m1_ptr, d_locs_m2_ptr);
+  T len_m1 = this->merge_cmty_self<T>(d_comity_tgt_m1.begin(), d_comity_tgt_m1.end(), d_comity_src_m1.begin(), d_comity_src_m1.end(), d_locs_src_m1.begin(), d_locs_tgt_m1.begin(),
+                                      d_comity_m1.begin(), d_locs_m1.begin());
 
-  T src_locs_comity1_len = src_m1_len + src_m2_len;
-  T tgt_locs_comity1_len = tgt_m1_len + tgt_m2_len;
+  thrust::device_vector<T> d_locs_m2(d_comity_tgt_m2.size() + d_comity_src_m2.size());
+  thrust::device_vector<T> d_comity_m2(d_comity_tgt_m2.size() + d_comity_src_m2.size());
+  T len_m2 = this->merge_cmty_self<T>(d_comity_tgt_m2.begin(), d_comity_tgt_m2.end(), d_comity_src_m2.begin(), d_comity_src_m2.end(), d_locs_src_m2.begin(), d_locs_tgt_m2.begin(),
+                                      d_comity_m2.begin(), d_locs_m2.begin());
 
-  thrust::device_ptr<T> d_src_locs_comity1_ptr = this->mallocAsyncThrust<T>(src_locs_comity1_len);
-  thrust::device_ptr<T> d_tgt_locs_comity1_ptr = this->mallocAsyncThrust<T>(tgt_locs_comity1_len);
+  this->cmty_intersection<T>(d_comity_m1.begin(), d_comity_m1.begin() + len_m1, d_comity_m2.begin(), d_comity_m2.begin() + len_m2, d_locs_m1.begin(), d_locs_m2.begin());
 
-  this->merge_cmty<T>(d_comity_tgt_m1_ptr, d_comity_tgt_m1_ptr + src_m1_len, d_comity_tgt_m2_ptr, d_comity_tgt_m2_ptr + src_m2_len, d_locs_src_m1_ptr, d_locs_src_m2_ptr, d_src_locs_comity1_ptr);
-  this->merge_cmty<T>(d_comity_src_m1_ptr, d_comity_src_m1_ptr + tgt_m1_len, d_comity_src_m2_ptr, d_comity_src_m2_ptr + tgt_m2_len, d_locs_tgt_m1_ptr, d_locs_tgt_m2_ptr, d_tgt_locs_comity1_ptr);
-
-  this->h_src_locs[comity1].resize(src_locs_comity1_len);
-  thrust::copy(d_src_locs_comity1_ptr, d_src_locs_comity1_ptr + src_locs_comity1_len, this->h_src_locs[comity1].begin());
+  thrust::device_vector<T> d_src_locs_comity1(d_comity_tgt_m1.size() + d_comity_tgt_m2.size());
+  this->merge_cmty<T>(d_comity_tgt_m1.begin(), d_comity_tgt_m1.end(), d_comity_tgt_m2.begin(), d_comity_tgt_m2.end(), d_locs_src_m1.begin(), d_locs_src_m2.begin(),
+                      d_src_locs_comity1.begin());
+  this->h_src_locs[comity1].resize(d_src_locs_comity1.size());
+  thrust::copy(d_src_locs_comity1.begin(), d_src_locs_comity1.end(), this->h_src_locs[comity1].begin());
   this->h_src_locs[comity2].clear();
   this->h_src_locs[comity2].shrink_to_fit();
 
-  this->h_tgt_locs[comity1].resize(tgt_locs_comity1_len);
-  thrust::copy(d_tgt_locs_comity1_ptr, d_tgt_locs_comity1_ptr + tgt_locs_comity1_len, this->h_tgt_locs[comity1].begin());
+  thrust::device_vector<T> d_tgt_locs_comity1(d_comity_src_m1.size() + d_comity_src_m2.size());
+  this->merge_cmty<T>(d_comity_src_m1.begin(), d_comity_src_m1.end(), d_comity_src_m2.begin(), d_comity_src_m2.end(), d_locs_tgt_m1.begin(), d_locs_tgt_m2.begin(),
+                      d_tgt_locs_comity1.begin());
+  this->h_tgt_locs[comity1].resize(d_tgt_locs_comity1.size());
+  thrust::copy(d_tgt_locs_comity1.begin(), d_tgt_locs_comity1.end(), this->h_tgt_locs[comity1].begin());
   this->h_tgt_locs[comity2].clear();
   this->h_tgt_locs[comity2].shrink_to_fit();
 
   thrust::device_vector<T> d_comity1_vec(this->h_community[comity1]);
   thrust::device_vector<T> d_comity2_vec(this->h_community[comity2]);
+  thrust::device_vector<T> d_comity1_label(d_comity2_vec.size(), comity1);
+  thrust::scatter(d_comity1_label.begin(), d_comity1_label.end(), d_comity2_vec.begin(), this->d_comity_label.begin());
 
-  T d_comity2_vec_len                       = this->h_community[comity2].size();
-  thrust::device_ptr<T> d_comity1_label_ptr = this->mallocAsyncThrust<T>(d_comity2_vec_len, comity1);
-  thrust::scatter(d_comity1_label_ptr, d_comity1_label_ptr + d_comity2_vec_len, d_comity2_vec.begin(), this->d_comity_label.begin());
-
-  T merge_comity_len                       = this->h_community[comity1].size() + this->h_community[comity2].size();
-  thrust::device_ptr<T> d_merge_comity_ptr = this->mallocAsyncThrust<T>(merge_comity_len);
-  thrust::merge(thrust::device, d_comity1_vec.begin(), d_comity1_vec.end(), d_comity2_vec.begin(), d_comity2_vec.end(), d_merge_comity_ptr);
-
-  this->h_community[comity1].resize(merge_comity_len);
-  thrust::copy(d_merge_comity_ptr, d_merge_comity_ptr + merge_comity_len, this->h_community[comity1].begin());
+  thrust::device_vector<T> d_merge_comity(this->h_community[comity1].size() + this->h_community[comity2].size());
+  thrust::merge(thrust::device, d_comity1_vec.begin(), d_comity1_vec.end(), d_comity2_vec.begin(), d_comity2_vec.end(), d_merge_comity.begin());
+  this->h_community[comity1].resize(d_merge_comity.size());
+  thrust::copy(d_merge_comity.begin(), d_merge_comity.end(), this->h_community[comity1].begin());
   this->h_community[comity2].clear();
   this->h_community[comity2].shrink_to_fit();
 
-  this->d_degree[comity1]               = this->d_degree_module[update_idx];
-  this->d_loop[comity1]                 = this->d_loop_module[update_idx];
-  thrust::device_ptr<T> d_degree1_merge = this->mallocAsyncThrust<T>(src_locs_comity1_len, this->d_degree_module[update_idx]);
-  thrust::device_ptr<T> d_degree2_merge = this->mallocAsyncThrust<T>(tgt_locs_comity1_len, this->d_degree_module[update_idx]);
-  thrust::device_ptr<T> d_loop1_merge   = this->mallocAsyncThrust<T>(src_locs_comity1_len, this->d_loop_module[update_idx]);
-  thrust::device_ptr<T> d_loop2_merge   = this->mallocAsyncThrust<T>(tgt_locs_comity1_len, this->d_loop_module[update_idx]);
+  this->d_degree[comity1] = this->d_degree_module[update_idx];
+  this->d_loop[comity1]   = this->d_loop_module[update_idx];
 
-  thrust::scatter(d_degree1_merge, d_degree1_merge + src_locs_comity1_len, d_src_locs_comity1_ptr, this->d_degree1.begin());
-  thrust::scatter(d_degree2_merge, d_degree2_merge + tgt_locs_comity1_len, d_tgt_locs_comity1_ptr, this->d_degree2.begin());
-  thrust::scatter(d_loop1_merge, d_loop1_merge + src_locs_comity1_len, d_src_locs_comity1_ptr, this->d_loop1.begin());
-  thrust::scatter(d_loop2_merge, d_loop2_merge + tgt_locs_comity1_len, d_tgt_locs_comity1_ptr, this->d_loop2.begin());
+  thrust::device_vector<int> d_degree1_merge(d_src_locs_comity1.size(), this->d_degree_module[update_idx]);
+  thrust::scatter(d_degree1_merge.begin(), d_degree1_merge.end(), d_src_locs_comity1.begin(), this->d_degree1.begin());
 
-  T vec_size = this->changed.size();
+  thrust::device_vector<int> d_degree2_merge(d_tgt_locs_comity1.size(), this->d_degree_module[update_idx]);
+  thrust::scatter(d_degree2_merge.begin(), d_degree2_merge.end(), d_tgt_locs_comity1.begin(), this->d_degree2.begin());
+
+  thrust::device_vector<int> d_loop1_merge(d_src_locs_comity1.size(), this->d_loop_module[update_idx]);
+  thrust::scatter(d_loop1_merge.begin(), d_loop1_merge.end(), d_src_locs_comity1.begin(), this->d_loop1.begin());
+
+  thrust::device_vector<int> d_loop2_merge(d_tgt_locs_comity1.size(), this->d_loop_module[update_idx]);
+  thrust::scatter(d_loop2_merge.begin(), d_loop2_merge.end(), d_tgt_locs_comity1.begin(), this->d_loop2.begin());
+
+  unsigned long vec_size = this->changed.size();
   if (vec_size > 0) {
-    thrust::device_ptr<T> d_degree1_c_ptr           = this->mallocAsyncThrust<T>(vec_size);
-    thrust::device_ptr<T> d_degree2_c_ptr           = this->mallocAsyncThrust<T>(vec_size);
-    thrust::device_ptr<T> d_loop1_c_ptr             = this->mallocAsyncThrust<T>(vec_size);
-    thrust::device_ptr<T> d_loop2_c_ptr             = this->mallocAsyncThrust<T>(vec_size);
-    thrust::device_ptr<T> d_degree_module_c_ptr     = this->mallocAsyncThrust<T>(vec_size);
-    thrust::device_ptr<T> d_loop_module_c_ptr       = this->mallocAsyncThrust<T>(vec_size);
-    thrust::device_ptr<T> d_connect_c_ptr           = this->mallocAsyncThrust<T>(vec_size);
-    thrust::device_ptr<T> d_degree_sum_c_ptr        = this->mallocAsyncThrust<T>(vec_size, this->degree_sum);
-    thrust::device_ptr<float> d_entropy_delta_c_ptr = this->mallocAsyncThrust<float>(vec_size);
+    thrust::device_vector<T> d_degree1_c(vec_size);
+    thrust::device_vector<T> d_degree2_c(vec_size);
+    thrust::device_vector<T> d_loop1_c(vec_size);
+    thrust::device_vector<T> d_loop2_c(vec_size);
+    thrust::device_vector<T> d_degree_module_c(vec_size);
+    thrust::device_vector<T> d_loop_module_c(vec_size);
+    thrust::device_vector<T> d_connect_c(vec_size);
+    thrust::device_vector<T> d_degree_sum_c(vec_size, this->degree_sum);
+    thrust::device_vector<float> d_entropy_delta_c(vec_size);
 
-    thrust::gather(this->changed.begin(), this->changed.end(), this->d_degree1.begin(), d_degree1_c_ptr);
-    thrust::gather(this->changed.begin(), this->changed.end(), this->d_degree2.begin(), d_degree2_c_ptr);
-    thrust::gather(this->changed.begin(), this->changed.end(), this->d_loop1.begin(), d_loop1_c_ptr);
-    thrust::gather(this->changed.begin(), this->changed.end(), this->d_loop2.begin(), d_loop2_c_ptr);
+    thrust::gather(this->changed.begin(), this->changed.end(), this->d_degree1.begin(), d_degree1_c.begin());
+    thrust::gather(this->changed.begin(), this->changed.end(), this->d_degree2.begin(), d_degree2_c.begin());
+    thrust::gather(this->changed.begin(), this->changed.end(), this->d_loop1.begin(), d_loop1_c.begin());
+    thrust::gather(this->changed.begin(), this->changed.end(), this->d_loop2.begin(), d_loop2_c.begin());
 
-    thrust::transform(d_degree1_c_ptr, d_degree1_c_ptr + vec_size, d_degree2_c_ptr, d_degree_module_c_ptr, thrust::plus<T>());
-    thrust::scatter(d_degree_module_c_ptr, d_degree_module_c_ptr + vec_size, this->changed.begin(), this->d_degree_module.begin());
+    thrust::transform(d_degree1_c.begin(), d_degree1_c.end(), d_degree2_c.begin(), d_degree_module_c.begin(), thrust::plus<T>());
+    thrust::scatter(d_degree_module_c.begin(), d_degree_module_c.end(), this->changed.begin(), this->d_degree_module.begin());
 
-    thrust::gather(this->changed.begin(), this->changed.end(), this->d_connect.begin(), d_connect_c_ptr);
-    thrust::transform(d_loop1_c_ptr, d_loop1_c_ptr + vec_size, d_loop2_c_ptr, d_loop_module_c_ptr, thrust::plus<T>());
-    thrust::transform(d_loop_module_c_ptr, d_loop_module_c_ptr + vec_size, d_connect_c_ptr, d_loop_module_c_ptr, thrust::plus<T>());
-    thrust::scatter(d_loop_module_c_ptr, d_loop_module_c_ptr + vec_size, this->changed.begin(), this->d_loop_module.begin());
+    thrust::gather(this->changed.begin(), this->changed.end(), this->d_connect.begin(), d_connect_c.begin());
+    thrust::transform(d_loop1_c.begin(), d_loop1_c.end(), d_loop2_c.begin(), d_loop_module_c.begin(), thrust::plus<T>());
+    thrust::transform(d_loop_module_c.begin(), d_loop_module_c.end(), d_connect_c.begin(), d_loop_module_c.begin(), thrust::plus<T>());
+    thrust::scatter(d_loop_module_c.begin(), d_loop_module_c.end(), this->changed.begin(), this->d_loop_module.begin());
 
-    thrust::transform(
-        thrust::make_zip_iterator(thrust::make_tuple(d_degree1_c_ptr, d_loop1_c_ptr, d_degree2_c_ptr, d_loop2_c_ptr, d_degree_module_c_ptr, d_loop_module_c_ptr, d_degree_sum_c_ptr, d_connect_c_ptr)),
-        thrust::make_zip_iterator(thrust::make_tuple(d_degree1_c_ptr + vec_size, d_loop1_c_ptr + vec_size, d_degree2_c_ptr + vec_size, d_loop2_c_ptr + vec_size, d_degree_module_c_ptr + vec_size,
-                                                     d_loop_module_c_ptr + vec_size, d_degree_sum_c_ptr + vec_size, d_connect_c_ptr + vec_size)),
-        d_entropy_delta_c_ptr, entropy_delta_functor<float>());
-    thrust::scatter(d_entropy_delta_c_ptr, d_entropy_delta_c_ptr + vec_size, this->changed.begin(), this->d_entropy_delta.begin());
+    thrust::transform(thrust::make_zip_iterator(thrust::make_tuple(d_degree1_c.begin(), d_loop1_c.begin(), d_degree2_c.begin(), d_loop2_c.begin(), d_degree_module_c.begin(),
+                                                                   d_loop_module_c.begin(), d_degree_sum_c.begin(), d_connect_c.begin())),
+                      thrust::make_zip_iterator(thrust::make_tuple(d_degree1_c.end(), d_loop1_c.end(), d_degree2_c.end(), d_loop2_c.end(), d_degree_module_c.end(),
+                                                                   d_loop_module_c.end(), d_degree_sum_c.end(), d_connect_c.end())),
+                      d_entropy_delta_c.begin(), entropy_delta_functor<float>());
+    thrust::scatter(d_entropy_delta_c.begin(), d_entropy_delta_c.end(), this->changed.begin(), this->d_entropy_delta.begin());
 
 #ifdef debug
     printf_detail("d_degree1_c", d_degree1_c.cbegin(), d_degree1_c.cend());
@@ -329,61 +314,16 @@ void HSSInfo::Update(const T &update_idx) {
     printf_detail("d_degree_sum_c", d_degree_sum_c.cbegin(), d_degree_sum_c.cend());
     printf_detail("d_entropy_delta_c", d_entropy_delta_c.cbegin(), d_entropy_delta_c.cend());
 #endif
-
-    this->freeAsyncThrust(d_degree1_c_ptr);
-    this->freeAsyncThrust(d_degree2_c_ptr);
-    this->freeAsyncThrust(d_loop1_c_ptr);
-    this->freeAsyncThrust(d_loop2_c_ptr);
-    this->freeAsyncThrust(d_degree_module_c_ptr);
-    this->freeAsyncThrust(d_loop_module_c_ptr);
-    this->freeAsyncThrust(d_connect_c_ptr);
-    this->freeAsyncThrust(d_degree_sum_c_ptr);
-    this->freeAsyncThrust(d_entropy_delta_c_ptr);
   }
-
-  this->freeAsyncThrust(d_locs_src_m1_ptr);
-  this->freeAsyncThrust(d_locs_tgt_m1_ptr);
-  this->freeAsyncThrust(d_locs_src_m2_ptr);
-  this->freeAsyncThrust(d_locs_tgt_m2_ptr);
-
-  this->freeAsyncThrust(d_idxs_tgt_m1_ptr);
-  this->freeAsyncThrust(d_idxs_src_m1_ptr);
-  this->freeAsyncThrust(d_idxs_tgt_m2_ptr);
-  this->freeAsyncThrust(d_idxs_src_m2_ptr);
-
-  this->freeAsyncThrust(d_comity_tgt_m1_ptr);
-  this->freeAsyncThrust(d_comity_src_m1_ptr);
-  this->freeAsyncThrust(d_comity_tgt_m2_ptr);
-  this->freeAsyncThrust(d_comity_src_m2_ptr);
-
-  this->freeAsyncThrust(d_locs_m1_ptr);
-  this->freeAsyncThrust(d_comity_m1_ptr);
-  this->freeAsyncThrust(d_locs_m2_ptr);
-  this->freeAsyncThrust(d_comity_m2_ptr);
-
-  this->freeAsyncThrust(d_src_locs_comity1_ptr);
-  this->freeAsyncThrust(d_tgt_locs_comity1_ptr);
-
-  this->freeAsyncThrust(d_comity1_label_ptr);
-  this->freeAsyncThrust(d_merge_comity_ptr);
-
-  this->freeAsyncThrust(d_degree1_merge);
-  this->freeAsyncThrust(d_degree2_merge);
-  this->freeAsyncThrust(d_loop1_merge);
-  this->freeAsyncThrust(d_loop2_merge);
-
-  // cudaStreamSynchronize(stream);
 }
 
 template <typename T, typename InputIterator, typename OutputIterator>
 T HSSInfo::gather_unfinished(InputIterator first, InputIterator last, OutputIterator result_first) {
   //此处将是否已经完成的结果汇总
-  T len                              = last - first;
-  thrust::device_ptr<bool> d_fin_ptr = this->mallocAsyncThrust<bool>(len);
-  thrust::gather(first, last, this->d_finished.begin(), d_fin_ptr);
-  T counts = thrust::count(thrust::device, d_fin_ptr, d_fin_ptr + len, THRUST_FALSE);
-  thrust::copy_if(thrust::device, first, last, d_fin_ptr, result_first, isUnfinished());
-  this->freeAsyncThrust(d_fin_ptr);
+  thrust::device_vector<bool> d_fin_vec(last - first);
+  thrust::gather(first, last, this->d_finished.begin(), d_fin_vec.begin());
+  T counts = thrust::count(thrust::device, d_fin_vec.begin(), d_fin_vec.end(), THRUST_FALSE);
+  thrust::copy_if(thrust::device, first, last, d_fin_vec.begin(), result_first, isUnfinished());
   return counts;
 }
 
@@ -418,92 +358,72 @@ T HSSInfo::merge_cmty_self(InputIterator skey_first, InputIterator skey_end, Inp
     return skey_end - skey_first;
   }
 
-  thrust::device_ptr<T> d_map_ptr           = this->mallocAsyncThrust<T>(vec_size);
-  thrust::device_ptr<T> d_cmty_ptr          = this->mallocAsyncThrust<T>(vec_size);
-  thrust::device_ptr<bool> repeatItem_ptr   = this->mallocAsyncThrust<bool>(vec_size);
-  thrust::device_ptr<bool> finished_vec_ptr = this->mallocAsyncThrust<bool>(vec_size);
-  thrust::device_ptr<float> zero_vec_ptr    = this->mallocAsyncThrust<float>(vec_size);
-  thrust::fill(repeatItem_ptr, repeatItem_ptr + vec_size, THRUST_FALSE);
-  thrust::fill(zero_vec_ptr, zero_vec_ptr + vec_size, 0);
+  thrust::device_vector<T> d_map(vec_size);
+  thrust::device_vector<T> d_cmty(vec_size);
+  thrust::merge_by_key(thrust::device, skey_first, skey_end, tkey_first, tkey_end, smap_first, tmap_first, d_cmty.begin(), d_map.begin());
 
-  thrust::merge_by_key(thrust::device, skey_first, skey_end, tkey_first, tkey_end, smap_first, tmap_first, d_cmty_ptr, d_map_ptr);
   // 找出重复的元素，设置为finish元素
-  thrust::transform(d_cmty_ptr, d_cmty_ptr + vec_size - 1, d_cmty_ptr + 1, repeatItem_ptr + 1, thrust::equal_to<T>());
-  thrust::gather(d_map_ptr, d_map_ptr + vec_size, this->d_finished.begin(), finished_vec_ptr);
-  thrust::transform(repeatItem_ptr, repeatItem_ptr + vec_size, finished_vec_ptr, finished_vec_ptr, thrust::logical_or<bool>());
-  thrust::scatter(finished_vec_ptr, finished_vec_ptr + vec_size, d_map_ptr, this->d_finished.begin());
-  thrust::scatter_if(zero_vec_ptr, zero_vec_ptr + vec_size, d_map_ptr, finished_vec_ptr, this->d_entropy_delta.begin(), isFinished());
+  thrust::device_vector<bool> repeatItem(vec_size, THRUST_FALSE);
+  thrust::transform(d_cmty.begin(), d_cmty.end() - 1, d_cmty.begin() + 1, repeatItem.begin() + 1, thrust::equal_to<T>());
+  thrust::device_vector<bool> finished_vec(vec_size);
+  thrust::gather(d_map.begin(), d_map.end(), this->d_finished.begin(), finished_vec.begin());
+  thrust::transform(repeatItem.begin(), repeatItem.end(), finished_vec.begin(), finished_vec.begin(), thrust::logical_or<bool>());
+  thrust::scatter(finished_vec.begin(), finished_vec.end(), d_map.begin(), this->d_finished.begin());
+  thrust::device_vector<bool> zero_vec(vec_size, 0);
+  thrust::scatter_if(zero_vec.begin(), zero_vec.end(), d_map.begin(), finished_vec.begin(), this->d_entropy_delta.begin(), isFinished());
 
   // 将未完成元素复制至新vec返回
-  T counts = thrust::count(thrust::device, finished_vec_ptr, finished_vec_ptr + vec_size, THRUST_FALSE);
-  this->bar += vec_size - counts;
-  thrust::copy_if(thrust::device, d_cmty_ptr, d_cmty_ptr + vec_size, finished_vec_ptr, result_comity_first, isUnfinished());
-  thrust::copy_if(thrust::device, d_map_ptr, d_map_ptr + vec_size, finished_vec_ptr, result_locs_first, isUnfinished());
-
-  this->freeAsyncThrust(d_map_ptr);
-  this->freeAsyncThrust(d_cmty_ptr);
-  this->freeAsyncThrust(repeatItem_ptr);
-  this->freeAsyncThrust(finished_vec_ptr);
-  this->freeAsyncThrust(zero_vec_ptr);
+  T counts = thrust::count(thrust::device, finished_vec.begin(), finished_vec.end(), THRUST_FALSE);
+  this->bar += finished_vec.size() - counts;
+  thrust::copy_if(thrust::device, d_cmty.begin(), d_cmty.end(), finished_vec.begin(), result_comity_first, isUnfinished());
+  thrust::copy_if(thrust::device, d_map.begin(), d_map.end(), finished_vec.begin(), result_locs_first, isUnfinished());
   return counts;
 }
 
 template <typename T, typename InputIterator>
-void HSSInfo::cmty_intersection(InputIterator key1_first, InputIterator key1_end, InputIterator key2_first, InputIterator key2_end, InputIterator map1_first,
-                                                           InputIterator map2_first) {
+void HSSInfo::cmty_intersection(InputIterator key1_first, InputIterator key1_end, InputIterator key2_first, InputIterator key2_end,
+                                                           InputIterator map1_first, InputIterator map2_first) {
   // 合并模块comity (cmty1 and cmty2)
   T vec_size = key1_end - key1_first + key2_end - key2_first;
   if (vec_size <= 0) { return; }
 
-  thrust::device_ptr<T> d_map_ptr            = this->mallocAsyncThrust<T>(vec_size);
-  thrust::device_ptr<T> d_cmty_ptr           = this->mallocAsyncThrust<T>(vec_size);
-  thrust::device_ptr<bool> repeatItem_ptr    = this->mallocAsyncThrust<bool>(vec_size);
-  thrust::device_ptr<bool> finished_vec_ptr  = this->mallocAsyncThrust<bool>(vec_size);
-  thrust::device_ptr<float> zero_vec_ptr     = this->mallocAsyncThrust<float>(vec_size);
-  thrust::device_ptr<T> d_connect_first_ptr  = this->mallocAsyncThrust<T>(vec_size - 1);
-  thrust::device_ptr<T> d_connect_second_ptr = this->mallocAsyncThrust<T>(vec_size - 1);
-  thrust::device_ptr<T> d_connect_plus_ptr   = this->mallocAsyncThrust<T>(vec_size);
-
-  thrust::fill(repeatItem_ptr, repeatItem_ptr + vec_size, THRUST_FALSE);
-  thrust::fill(zero_vec_ptr, zero_vec_ptr + vec_size, 0);
-
-  thrust::merge_by_key(thrust::device, key1_first, key1_end, key2_first, key2_end, map1_first, map2_first, d_cmty_ptr, d_map_ptr);
+  thrust::device_vector<T> d_map(vec_size);
+  thrust::device_vector<T> d_cmty(vec_size);
+  thrust::merge_by_key(thrust::device, key1_first, key1_end, key2_first, key2_end, map1_first, map2_first, d_cmty.begin(), d_map.begin());
 
   // 找出重复的元素，设置为finish元素
-  thrust::transform(d_cmty_ptr, d_cmty_ptr + vec_size - 1, d_cmty_ptr + 1, repeatItem_ptr + 1, thrust::equal_to<T>());
-  thrust::gather(d_map_ptr, d_map_ptr + vec_size, this->d_finished.begin(), finished_vec_ptr);
-  thrust::transform(repeatItem_ptr, repeatItem_ptr + vec_size, finished_vec_ptr, finished_vec_ptr, thrust::logical_or<bool>());
-  thrust::scatter(finished_vec_ptr, finished_vec_ptr + vec_size, d_map_ptr, this->d_finished.begin());
-  thrust::scatter_if(zero_vec_ptr, zero_vec_ptr + vec_size, d_map_ptr, finished_vec_ptr, this->d_entropy_delta.begin(), isFinished());
+  thrust::device_vector<bool> repeatItem(vec_size, THRUST_FALSE);
+  thrust::transform(d_cmty.begin(), d_cmty.end() - 1, d_cmty.begin() + 1, repeatItem.begin() + 1, thrust::equal_to<T>());
+  thrust::device_vector<bool> finished_vec(vec_size);
+  thrust::gather(d_map.begin(), d_map.end(), this->d_finished.begin(), finished_vec.begin());
+  thrust::transform(repeatItem.begin(), repeatItem.end(), finished_vec.begin(), finished_vec.begin(), thrust::logical_or<bool>());
+  thrust::scatter(finished_vec.begin(), finished_vec.end(), d_map.begin(), this->d_finished.begin());
+  thrust::device_vector<T> zero_vec(vec_size, 0);
+  thrust::scatter_if(zero_vec.begin(), zero_vec.end(), d_map.begin(), finished_vec.begin(), this->d_entropy_delta.begin(), isFinished());
 
-  thrust::gather(d_map_ptr, d_map_ptr + vec_size - 1, this->d_connect.begin(), d_connect_first_ptr);
-  thrust::gather(d_map_ptr + 1, d_map_ptr + vec_size, this->d_connect.begin(), d_connect_second_ptr);
-  thrust::gather(d_map_ptr, d_map_ptr + vec_size, this->d_connect.begin(), d_connect_plus_ptr);
-  thrust::transform_if(thrust::device, d_connect_first_ptr, d_connect_first_ptr + vec_size - 1, d_connect_second_ptr, finished_vec_ptr + 1, d_connect_plus_ptr, thrust::plus<T>(), isFinished());
-  thrust::scatter(d_connect_plus_ptr, d_connect_plus_ptr + vec_size, d_map_ptr, this->d_connect.begin());
+  thrust::device_vector<T> d_connect_first(vec_size - 1);
+  thrust::device_vector<T> d_connect_second(vec_size - 1);
+  thrust::device_vector<T> d_connect_plus(vec_size);
+  thrust::gather(d_map.begin(), d_map.end() - 1, this->d_connect.begin(), d_connect_first.begin());
+  thrust::gather(d_map.begin() + 1, d_map.end(), this->d_connect.begin(), d_connect_second.begin());
+  thrust::gather(d_map.begin(), d_map.end(), this->d_connect.begin(), d_connect_plus.begin());
 
-  long counts = thrust::count(thrust::device, finished_vec_ptr, finished_vec_ptr + vec_size, THRUST_FALSE);
-  this->bar += vec_size - counts;
+  thrust::transform_if(thrust::device, d_connect_first.begin(), d_connect_first.end(), d_connect_second.begin(), finished_vec.begin() + 1, d_connect_plus.begin(),
+                       thrust::plus<T>(), isFinished());
+  thrust::scatter(d_connect_plus.begin(), d_connect_plus.end(), d_map.begin(), this->d_connect.begin());
+
+  long counts = thrust::count(thrust::device, finished_vec.begin(), finished_vec.end(), THRUST_FALSE);
+  this->bar += finished_vec.size() - counts;
   this->changed.resize(counts);
-  thrust::copy_if(thrust::device, d_map_ptr, d_map_ptr + vec_size, finished_vec_ptr, this->changed.begin(), isUnfinished());
-
-  this->freeAsyncThrust(d_map_ptr);
-  this->freeAsyncThrust(d_cmty_ptr);
-  this->freeAsyncThrust(repeatItem_ptr);
-  this->freeAsyncThrust(finished_vec_ptr);
-  this->freeAsyncThrust(zero_vec_ptr);
-  this->freeAsyncThrust(d_connect_first_ptr);
-  this->freeAsyncThrust(d_connect_second_ptr);
-  this->freeAsyncThrust(d_connect_plus_ptr);
+  thrust::copy_if(thrust::device, d_map.begin(), d_map.end(), finished_vec.begin(), this->changed.begin(), isUnfinished());
 }
 
 template <typename T, typename InputIterator, typename OutputIterator>
 void HSSInfo::merge_cmty(InputIterator key1_first, InputIterator key1_end, InputIterator key2_first, InputIterator key2_end, InputIterator map1_first,
                                                     InputIterator map2_first, OutputIterator result_map_first) {
-  T vec_size                       = key1_end - key1_first + key2_end - key2_first;
-  thrust::device_ptr<T> d_cmty_ptr = this->mallocAsyncThrust<T>(vec_size);
-  thrust::merge_by_key(thrust::device, key1_first, key1_end, key2_first, key2_end, map1_first, map2_first, d_cmty_ptr, result_map_first);
-  this->freeAsyncThrust(d_cmty_ptr);
+  T vec_size = key1_end - key1_first + key2_end - key2_first;
+  thrust::device_vector<T> d_cmty(vec_size);
+  thrust::merge_by_key(thrust::device, key1_first, key1_end, key2_first, key2_end, map1_first, map2_first, d_cmty.begin(), result_map_first);
 }
 
 void HSSInfo::printf_detail() {
