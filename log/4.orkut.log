@@ -1,0 +1,10 @@
+input_file = data/snap/Networks-with-ground-truth-communities/com-Orkut/com-orkut.ungraph.once.txt, output_file = data/snap/Networks-with-ground-truth-communities/com-Orkut/com-orkut.ungraph.hssinfo.txt, process_num = 3072441
+
+reading data/snap/Networks-with-ground-truth-communities/com-Orkut/com-orkut.ungraph.once.txt
+Processing => [100.00%]  117185082 / 117185083:
+read finish
+init time = 403.464
+
+community detection start
+Processing => [99.47%]  116558415 / 117185083:
+community detection time = 13586

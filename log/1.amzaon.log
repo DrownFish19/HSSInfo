@@ -1,0 +1,10 @@
+input_file = data/snap/Networks-with-ground-truth-communities/com-Amazon/com-amazon.ungraph.once.txt, output_file = data/snap/Networks-with-ground-truth-communities/com-Amazon/com-amazon.ungraph.hssinfo.txt, process_num = 334863
+
+reading data/snap/Networks-with-ground-truth-communities/com-Amazon/com-amazon.ungraph.once.txt
+Processing => [100.00%]  925871 / 925872:
+read finish
+init time = 3.95295
+
+community detection start
+Processing => [91.56%]  847764 / 925872:
+community detection time = 355.106
