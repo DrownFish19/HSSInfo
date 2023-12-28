@@ -16,11 +16,8 @@
 
 #include "hssinfo.hpp"
 //#define debug
-HSSInfo::HSSInfo(const int &nodes, const std::string &filename) : nodes(nodes) {
+HSSInfo::HSSInfo(const int &nodes, const std::vector<int> rows, const std::vector<int> cols, const std::vector<int> weights) : nodes(nodes) {
   /**********  初始化数据，使用host方法进行读取数据   *************/
-  std::vector<int> rows;
-  std::vector<int> cols;
-  std::vector<int> weights;
   std::vector<std::vector<int>> src_locs;
   std::vector<std::vector<int>> tgt_locs;
   src_locs.resize(nodes);
@@ -32,39 +29,20 @@ HSSInfo::HSSInfo(const int &nodes, const std::string &filename) : nodes(nodes) {
   degree.resize(nodes, 0);
   loop.resize(nodes, 0);
 
-  std::cout << "reading " << filename << std::endl;
-  std::ifstream in(filename);
-  std::string line;
-  int count = 0;
-  while (getline(in, line)) {   //将in文件中的每一行字符读入到string line中
-    std::stringstream ss(line); //使用string初始化stringstream
-    int row;
-    int col;
-    //    int weight;
-    ss >> row;
-    ss >> col;
-    //    ss >> weight;
-    rows.push_back(row);
-    cols.push_back(col);
-    weights.push_back(1);
+  for (int i = 0; i < rows.size(); i++) {
+    degree[rows[i]] += 1; //is weight
+    degree[cols[i]] += 1; //is weight
 
-    degree[row] += 1; //is weight
-    degree[col] += 1; //is weight
-    if (row == col) {
-      loop[row] += 1; // is weight
+    if (rows[i] == cols[i]) {
+      loop[rows[i]] += 1; // is weight
       finished.push_back(true);
     } else {
       finished.push_back(false);
     }
 
-    src_locs[row].emplace_back(count);
-    tgt_locs[col].emplace_back(count);
-
-    count++;
-    this->printf_bar(count, count - 1);
+    src_locs[rows[i]].emplace_back(i);
+    tgt_locs[cols[i]].emplace_back(i);
   }
-  in.close();
-  std::cout << std::endl << "read finish" << std::endl;
   /**********  初始化数据读取完成  *************/
 
   /************  初始化 cuda stream 和 内存池  ****************/
@@ -75,7 +53,7 @@ HSSInfo::HSSInfo(const int &nodes, const std::string &filename) : nodes(nodes) {
   cudaMemPoolSetAttribute(this->memPool, cudaMemPoolAttrReleaseThreshold, (void *) &thresholdVal);
   /************  初始化 cuda stream 和 内存池 完成  ****************/
 
-  this->edges = count;
+  this->edges = rows.size();
 
   this->h_community.resize(this->nodes);
   for (int idx = 0; idx < this->nodes; idx++) { this->h_community[idx].push_back(idx); }
@@ -402,8 +380,8 @@ void HSSInfo::gather_cmty(InputIterator map_first, InputIterator map_last, Outpu
 }
 
 template <typename T, typename InputIterator, typename OutputIterator>
-T HSSInfo::merge_cmty_self(InputIterator skey_first, InputIterator skey_end, InputIterator tkey_first, InputIterator tkey_end, InputIterator smap_first,
-                                                      InputIterator tmap_first, OutputIterator result_comity_first, OutputIterator result_locs_first) {
+T HSSInfo::merge_cmty_self(InputIterator skey_first, InputIterator skey_end, InputIterator tkey_first, InputIterator tkey_end, InputIterator smap_first, InputIterator tmap_first,
+                           OutputIterator result_comity_first, OutputIterator result_locs_first) {
   // 合并模块comity (src and tgt)
   T vec_size = skey_end - skey_first + tkey_end - tkey_first;
   if (vec_size == 0) { return 0; }
@@ -449,8 +427,7 @@ T HSSInfo::merge_cmty_self(InputIterator skey_first, InputIterator skey_end, Inp
 }
 
 template <typename T, typename InputIterator>
-void HSSInfo::cmty_intersection(InputIterator key1_first, InputIterator key1_end, InputIterator key2_first, InputIterator key2_end, InputIterator map1_first,
-                                                           InputIterator map2_first) {
+void HSSInfo::cmty_intersection(InputIterator key1_first, InputIterator key1_end, InputIterator key2_first, InputIterator key2_end, InputIterator map1_first, InputIterator map2_first) {
   // 合并模块comity (cmty1 and cmty2)
   T vec_size = key1_end - key1_first + key2_end - key2_first;
   if (vec_size <= 0) { return; }
@@ -498,8 +475,8 @@ void HSSInfo::cmty_intersection(InputIterator key1_first, InputIterator key1_end
 }
 
 template <typename T, typename InputIterator, typename OutputIterator>
-void HSSInfo::merge_cmty(InputIterator key1_first, InputIterator key1_end, InputIterator key2_first, InputIterator key2_end, InputIterator map1_first,
-                                                    InputIterator map2_first, OutputIterator result_map_first) {
+void HSSInfo::merge_cmty(InputIterator key1_first, InputIterator key1_end, InputIterator key2_first, InputIterator key2_end, InputIterator map1_first, InputIterator map2_first,
+                         OutputIterator result_map_first) {
   T vec_size                       = key1_end - key1_first + key2_end - key2_first;
   thrust::device_ptr<T> d_cmty_ptr = this->mallocAsyncThrust<T>(vec_size);
   thrust::merge_by_key(thrust::device, key1_first, key1_end, key2_first, key2_end, map1_first, map2_first, d_cmty_ptr, result_map_first);
@@ -571,15 +548,4 @@ void HSSInfo::printf_bar(T edgeNum, T now) {
   printf("\rProcessing => [%.2f%%]  %d / %d:", perc, now, edgeNum);
   //  for (int j = 1; j <= perc; j++) { printf("█"); }
   fflush(stdout);
-}
-void HSSInfo::output_clusters(const std::string &filename) {
-  std::ofstream fout;
-  fout.open(filename, std::ios::out | std::ios::ate);
-
-  for (auto i = 0; i < this->h_community.size(); i++) {
-    if (!this->h_community[i].empty()) {
-      for (auto index = this->h_community[i].cbegin(); index < this->h_community[i].cend(); index++) { fout << *index << " "; }
-      fout << std::endl;
-    }
-  }
 }

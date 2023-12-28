@@ -97,7 +97,7 @@ public:
   thrust::device_vector<int> changed; //不确定位置
 
 public:
-  HSSInfo(const int &nodes, const std::string &filename);
+  HSSInfo(const int &nodes, const std::vector<int> rows, const std::vector<int> cols, const std::vector<int> weights);
 
   void CommunityDetection();
 
@@ -159,8 +159,7 @@ public:
 
   template <typename T>
   void printf_bar(T edgeNum, T now);
-
-  void output_clusters(const std::string &filename);
+  
 };
 
 #endif // HSSINFO_HSSINFO_HPP
