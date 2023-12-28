@@ -64,40 +64,40 @@ private:
 public:
   int nodes;
   int edges;
-  thrust::device_vector<int> d_src_idx; // edges
-  thrust::device_vector<int> d_tgt_idx; // edges
-  thrust::device_vector<int> d_weights; // edges
+  thrust::device_vector<int> d_src_idx;   // edges
+  thrust::device_vector<int> d_tgt_idx;   // edges
+  thrust::device_vector<float> d_weights; // edges
 
   thrust::host_vector<thrust::host_vector<int>> h_src_locs;  // nodes
   thrust::host_vector<thrust::host_vector<int>> h_tgt_locs;  // nodes
   thrust::host_vector<thrust::host_vector<int>> h_community; // nodes
   thrust::device_vector<int> d_comity_label;                 // nodes
 
-  thrust::device_vector<int> d_degree; // nodes
-  thrust::device_vector<int> d_loop;   // nodes
+  thrust::device_vector<float> d_degree; // nodes
+  thrust::device_vector<float> d_loop;   // nodes
 
   thrust::device_vector<bool> d_finished;       // edges
-  thrust::device_vector<int> d_degree1;         // edges
-  thrust::device_vector<int> d_degree2;         // edges
-  thrust::device_vector<int> d_loop1;           // edges
-  thrust::device_vector<int> d_loop2;           // edges
-  thrust::device_vector<int> d_connect;         // edges
-  thrust::device_vector<int> d_loop_module;     // edges
-  thrust::device_vector<int> d_degree_module;   // edges
+  thrust::device_vector<float> d_degree1;       // edges
+  thrust::device_vector<float> d_degree2;       // edges
+  thrust::device_vector<float> d_loop1;         // edges
+  thrust::device_vector<float> d_loop2;         // edges
+  thrust::device_vector<float> d_connect;       // edges
+  thrust::device_vector<float> d_loop_module;   // edges
+  thrust::device_vector<float> d_degree_module; // edges
   thrust::device_vector<float> d_entropy_delta; // edges
 
-  thrust::device_vector<int> h_degree1; // edges
-  thrust::device_vector<int> h_degree2; // edges
-  thrust::device_vector<int> h_loop1;   // edges
-  thrust::device_vector<int> h_loop2;   // edges
+  thrust::device_vector<float> h_degree1; // edges
+  thrust::device_vector<float> h_degree2; // edges
+  thrust::device_vector<float> h_loop1;   // edges
+  thrust::device_vector<float> h_loop2;   // edges
 
-  int degree_sum = 0;
-  int bar        = 0;
+  float degree_sum = 0;
+  int bar          = 0;
 
   thrust::device_vector<int> changed; //不确定位置
 
 public:
-  HSSInfo(const int &nodes, const std::vector<int> rows, const std::vector<int> cols, const std::vector<int> weights);
+  HSSInfo(const int &nodes, const std::vector<int> rows, const std::vector<int> cols, const std::vector<float> weights);
 
   void CommunityDetection();
 
@@ -109,10 +109,10 @@ public:
   template <typename T, typename InputIterator, typename OutputIterator>
   T gather_unfinished(InputIterator first, InputIterator last, OutputIterator result_first);
 
-  template <typename T, typename InputIterator, typename OutputIterator>
+  template <typename InputIterator, typename OutputIterator>
   void gather_idxs(InputIterator map_first, InputIterator map_last, int type, OutputIterator result_first);
 
-  template <typename T, typename InputIterator, typename OutputIterator>
+  template <typename InputIterator, typename OutputIterator>
   void gather_cmty(InputIterator map_first, InputIterator map_last, OutputIterator result_first);
 
   template <typename T, typename InputIterator, typename OutputIterator>
@@ -159,7 +159,6 @@ public:
 
   template <typename T>
   void printf_bar(T edgeNum, T now);
-  
 };
 
 #endif // HSSINFO_HSSINFO_HPP
