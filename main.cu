@@ -2,11 +2,11 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <fstream>
 #include <iostream>
 #include <ostream>
-#include <fstream>
 
-#include "hssinfo.hpp"
+#include "hssinfo.cc"
 
 int main(int argc, char* argv[]) {
   //  int nodes     = 6;
@@ -59,7 +59,8 @@ int main(int argc, char* argv[]) {
   double timeuse;
   gettimeofday(&t1, nullptr);
 
-  std::vector<int> rows(nodes), cols(nodes), weights(nodes);
+  std::vector<int> rows(nodes), cols(nodes);
+  std::vector<float> weights(nodes);
   std::ifstream in(filename);
   std::string line;
   while (getline(in, line)) {   //将in文件中的每一行字符读入到string line中
@@ -72,7 +73,7 @@ int main(int argc, char* argv[]) {
     //    ss >> weight;
     rows.push_back(row);
     cols.push_back(col);
-    weights.push_back(1);
+    weights.push_back(0.1);
   }
 
   HSSInfo info(nodes, rows, cols, weights);
@@ -96,5 +97,4 @@ int main(int argc, char* argv[]) {
       fout << std::endl;
     }
   }
-
 }
