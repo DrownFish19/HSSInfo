@@ -14,7 +14,7 @@
 #include <algorithm>
 #include <fstream>
 
-#include "hssinfo.hpp"
+#include "hssinfo.cc"
 //#define debug
 HSSInfo::HSSInfo(const int &nodes, const std::vector<int> rows, const std::vector<int> cols, const std::vector<float> weights) : nodes(nodes) {
   /**********  初始化数据，使用host方法进行读取数据   *************/

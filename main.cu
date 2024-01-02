@@ -6,7 +6,7 @@
 #include <iostream>
 #include <ostream>
 
-#include "hssinfo.hpp"
+#include "hssinfo.cc"
 
 int main(int argc, char* argv[]) {
   //  int nodes     = 6;
