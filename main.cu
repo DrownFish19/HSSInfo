@@ -59,8 +59,8 @@ int main(int argc, char* argv[]) {
   double timeuse;
   gettimeofday(&t1, nullptr);
 
-  std::vector<int> rows(nodes), cols(nodes);
-  std::vector<float> weights(nodes);
+  std::vector<int> rows, cols;
+  std::vector<float> weights;
   std::ifstream in(filename);
   std::string line;
   while (getline(in, line)) {   //将in文件中的每一行字符读入到string line中
@@ -73,9 +73,9 @@ int main(int argc, char* argv[]) {
     //    ss >> weight;
     rows.push_back(row);
     cols.push_back(col);
-    weights.push_back(0.1);
+    weights.push_back(0.00001);
   }
-
+  
   HSSInfo info(nodes, rows, cols, weights);
 
   gettimeofday(&t2, nullptr);

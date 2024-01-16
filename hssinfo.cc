@@ -91,7 +91,7 @@ public:
   thrust::device_vector<float> h_loop1;   // edges
   thrust::device_vector<float> h_loop2;   // edges
 
-  float degree_sum = 0;
+  float degree_sum = 0.0;
   int bar          = 0;
 
   thrust::device_vector<int> changed; //不确定位置
