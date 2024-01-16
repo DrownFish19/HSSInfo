@@ -544,8 +544,10 @@ void HSSInfo::printf_detail(std::string name, InputIterator first, InputIterator
 }
 template <typename T>
 void HSSInfo::printf_bar(T edgeNum, T now) {
+#ifdef debug
   float perc = now * 100.0 / (edgeNum - 1);
   printf("\rProcessing => [%.2f%%]  %d / %d:", perc, now, edgeNum);
   //  for (int j = 1; j <= perc; j++) { printf("█"); }
   fflush(stdout);
+#endif
 }
