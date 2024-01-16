@@ -26,15 +26,15 @@ HSSInfo::HSSInfo(const int &nodes, const std::vector<int> rows, const std::vecto
   std::vector<float> degree;
   std::vector<float> loop;
   std::vector<bool> finished;
-  degree.resize(nodes, 0);
-  loop.resize(nodes, 0);
+  degree.resize(nodes, 0.0);
+  loop.resize(nodes, 0.0);
 
   for (int i = 0; i < rows.size(); i++) {
-    degree[rows[i]] += 1; //is weight
-    degree[cols[i]] += 1; //is weight
+    degree[rows[i]] += weights[rows[i]]; //is weight
+    degree[cols[i]] += weights[cols[i]]; //is weight
 
     if (rows[i] == cols[i]) {
-      loop[rows[i]] += 1; // is weight
+      loop[rows[i]] += weights[rows[i]]; // is weight
       finished.push_back(true);
     } else {
       finished.push_back(false);
@@ -42,9 +42,9 @@ HSSInfo::HSSInfo(const int &nodes, const std::vector<int> rows, const std::vecto
 
     src_locs[rows[i]].emplace_back(i);
     tgt_locs[cols[i]].emplace_back(i);
-  }
+      }
   /**********  初始化数据读取完成  *************/
-
+  this->printf_detail();
   /************  初始化 cuda stream 和 内存池  ****************/
   cudaSetDevice(0);
   cudaStreamCreateWithFlags(&this->stream, cudaStreamNonBlocking); //设置stream
@@ -90,7 +90,7 @@ HSSInfo::HSSInfo(const int &nodes, const std::vector<int> rows, const std::vecto
   }
 
   thrust::transform(this->d_degree.begin(), this->d_degree.end(), this->d_loop.begin(), this->d_degree.begin(), thrust::minus<float>());
-  thrust::device_vector<int> d_degree_loop(this->nodes);
+  thrust::device_vector<float> d_degree_loop(this->nodes);
   thrust::transform(this->d_degree.begin(), this->d_degree.end(), this->d_loop.begin(), d_degree_loop.begin(), thrust::minus<float>());
   this->degree_sum = thrust::reduce(d_degree_loop.begin(), d_degree_loop.end());
 
@@ -111,7 +111,7 @@ HSSInfo::HSSInfo(const int &nodes, const std::vector<int> rows, const std::vecto
   thrust::transform(this->d_loop1.begin(), this->d_loop1.end(), this->d_loop2.begin(), this->d_loop_module.begin(), thrust::plus<float>());
   thrust::transform(this->d_loop_module.begin(), this->d_loop_module.end(), this->d_connect.begin(), this->d_loop_module.begin(), thrust::plus<float>());
 
-  thrust::device_vector<int> d_degree_sum_vec(this->d_loop_module.size(), this->degree_sum);
+  thrust::device_vector<float> d_degree_sum_vec(this->d_loop_module.size(), this->degree_sum);
 
   thrust::transform(thrust::make_zip_iterator(thrust::make_tuple(this->d_degree1.begin(), this->d_loop1.begin(), this->d_degree2.begin(), this->d_loop2.begin(), this->d_degree_module.begin(),
                                                                  this->d_loop_module.begin(), d_degree_sum_vec.begin(), this->d_connect.begin())),
@@ -296,7 +296,7 @@ void HSSInfo::Update(const T &update_idx) {
         d_entropy_delta_c_ptr, entropy_delta_functor<float>());
     thrust::scatter(d_entropy_delta_c_ptr, d_entropy_delta_c_ptr + vec_size, this->changed.begin(), this->d_entropy_delta.begin());
 
-#ifdef debug
+    #ifdef debug
     printf_detail("d_degree1_c", d_degree1_c.cbegin(), d_degree1_c.cend());
     printf_detail("d_degree2_c", d_degree2_c.cbegin(), d_degree2_c.cend());
     printf_detail("d_loop1_c", d_loop1_c.cbegin(), d_loop1_c.cend());
@@ -306,7 +306,7 @@ void HSSInfo::Update(const T &update_idx) {
     printf_detail("d_connect_c", d_connect_c.cbegin(), d_connect_c.cend());
     printf_detail("d_degree_sum_c", d_degree_sum_c.cbegin(), d_degree_sum_c.cend());
     printf_detail("d_entropy_delta_c", d_entropy_delta_c.cbegin(), d_entropy_delta_c.cend());
-#endif
+    #endif
 
     this->freeAsyncThrust(d_degree1_c_ptr);
     this->freeAsyncThrust(d_degree2_c_ptr);
@@ -486,42 +486,42 @@ void HSSInfo::merge_cmty(InputIterator key1_first, InputIterator key1_end, Input
 void HSSInfo::printf_detail() {
 #ifdef debug
   printf("degree:\t");
-  std::for_each(d_degree.cbegin(), d_degree.cend(), printf_functor_int());
+  std::for_each(d_degree.cbegin(), d_degree.cend(), printf_functor_float());
   printf("\n");
   printf("loop:\t");
-  std::for_each(d_loop.cbegin(), d_loop.cend(), printf_functor_int());
+  std::for_each(d_loop.cbegin(), d_loop.cend(), printf_functor_float());
   printf("\n");
 
   printf("degree1:\t\t");
-  std::for_each(d_degree1.cbegin(), d_degree1.cend(), printf_functor_int());
+  std::for_each(d_degree1.cbegin(), d_degree1.cend(), printf_functor_float());
   printf("\n");
   printf("degree2:\t\t");
-  std::for_each(d_degree2.cbegin(), d_degree2.cend(), printf_functor_int());
+  std::for_each(d_degree2.cbegin(), d_degree2.cend(), printf_functor_float());
   printf("\n");
   printf("degree_module:\t");
-  std::for_each(d_degree_module.cbegin(), d_degree_module.cend(), printf_functor_int());
+  std::for_each(d_degree_module.cbegin(), d_degree_module.cend(), printf_functor_float());
   printf("\n");
 
   printf("loop1:\t\t\t");
-  std::for_each(d_loop1.cbegin(), d_loop1.cend(), printf_functor_int());
+  std::for_each(d_loop1.cbegin(), d_loop1.cend(), printf_functor_float());
   printf("\n");
   printf("loop2:\t\t\t");
-  std::for_each(d_loop2.cbegin(), d_loop2.cend(), printf_functor_int());
+  std::for_each(d_loop2.cbegin(), d_loop2.cend(), printf_functor_float());
   printf("\n");
   printf("loop_module:\t");
-  std::for_each(d_loop_module.cbegin(), d_loop_module.cend(), printf_functor_int());
+  std::for_each(d_loop_module.cbegin(), d_loop_module.cend(), printf_functor_float());
   printf("\n");
 
   printf("connect:\t\t");
-  std::for_each(d_connect.cbegin(), d_connect.cend(), printf_functor_int());
+  std::for_each(d_connect.cbegin(), d_connect.cend(), printf_functor_float());
   printf("\n");
 
   printf("finished:\t\t");
-  std::for_each(d_finished.cbegin(), d_finished.cend(), printf_functor_int());
+  std::for_each(d_finished.cbegin(), d_finished.cend(), printf_functor_float());
   printf("\n");
 
   printf("changed:\t");
-  std::for_each(changed.cbegin(), changed.cend(), printf_functor_int());
+  std::for_each(changed.cbegin(), changed.cend(), printf_functor_float());
   printf("\n");
 
   printf("entropy_delta:\t");
