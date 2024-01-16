@@ -296,18 +296,6 @@ void HSSInfo::Update(const T &update_idx) {
         d_entropy_delta_c_ptr, entropy_delta_functor<float>());
     thrust::scatter(d_entropy_delta_c_ptr, d_entropy_delta_c_ptr + vec_size, this->changed.begin(), this->d_entropy_delta.begin());
 
-    #ifdef debug
-    printf_detail("d_degree1_c", d_degree1_c.cbegin(), d_degree1_c.cend());
-    printf_detail("d_degree2_c", d_degree2_c.cbegin(), d_degree2_c.cend());
-    printf_detail("d_loop1_c", d_loop1_c.cbegin(), d_loop1_c.cend());
-    printf_detail("d_loop2_c", d_loop2_c.cbegin(), d_loop2_c.cend());
-    printf_detail("d_degree_module_c", d_degree_module_c.cbegin(), d_degree_module_c.cend());
-    printf_detail("d_loop_module_c", d_loop_module_c.cbegin(), d_loop_module_c.cend());
-    printf_detail("d_connect_c", d_connect_c.cbegin(), d_connect_c.cend());
-    printf_detail("d_degree_sum_c", d_degree_sum_c.cbegin(), d_degree_sum_c.cend());
-    printf_detail("d_entropy_delta_c", d_entropy_delta_c.cbegin(), d_entropy_delta_c.cend());
-    #endif
-
     this->freeAsyncThrust(d_degree1_c_ptr);
     this->freeAsyncThrust(d_degree2_c_ptr);
     this->freeAsyncThrust(d_loop1_c_ptr);
