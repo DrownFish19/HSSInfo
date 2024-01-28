@@ -30,11 +30,11 @@ HSSInfo::HSSInfo(const int &nodes, const std::vector<int> rows, const std::vecto
   loop.resize(nodes, 0.0);
 
   for (int i = 0; i < rows.size(); i++) {
-    degree[rows[i]] += weights[rows[i]]; //is weight
-    degree[cols[i]] += weights[cols[i]]; //is weight
+    degree[rows[i]] += weights[i]; //is weight
+    degree[cols[i]] += weights[i]; //is weight
 
     if (rows[i] == cols[i]) {
-      loop[rows[i]] += weights[rows[i]]; // is weight
+      loop[rows[i]] += weights[i]; // is weight
       finished.push_back(true);
     } else {
       finished.push_back(false);
@@ -42,7 +42,7 @@ HSSInfo::HSSInfo(const int &nodes, const std::vector<int> rows, const std::vecto
 
     src_locs[rows[i]].emplace_back(i);
     tgt_locs[cols[i]].emplace_back(i);
-      }
+  }
   /**********  初始化数据读取完成  *************/
   this->printf_detail();
   /************  初始化 cuda stream 和 内存池  ****************/
@@ -134,6 +134,12 @@ void HSSInfo::CommunityDetection() {
   thrust::detail::normal_iterator<thrust::device_ptr<float>> max_index = thrust::max_element(thrust::device, this->d_entropy_delta.begin(), this->d_entropy_delta.end());
   while (*max_index > 0) {
     //    gettimeofday(&t1, nullptr);
+#ifdef debug
+    std::cout << "max entropy = " << *max_index << std::endl;
+    std::cout << "max index = " << max_index - this->d_entropy_delta.begin() << std::endl;
+    std::cout << "max node = " << this->d_src_idx[max_index - this->d_entropy_delta.begin()] << std::endl;
+    std::cout << "max node = " << this->d_tgt_idx[max_index - this->d_entropy_delta.begin()] << std::endl;
+#endif
     this->Update<int>(max_index - this->d_entropy_delta.begin());
     //    gettimeofday(&t2, nullptr);
     max_index = thrust::max_element(thrust::device, this->d_entropy_delta.begin(), this->d_entropy_delta.end());
