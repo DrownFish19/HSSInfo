@@ -67,13 +67,13 @@ int main(int argc, char* argv[]) {
     std::stringstream ss(line); //使用string初始化stringstream
     int row;
     int col;
-    //    int weight;
+    float weight;
     ss >> row;
     ss >> col;
-    //    ss >> weight;
+    ss >> weight;
     rows.push_back(row);
     cols.push_back(col);
-    weights.push_back(0.00001);
+    weights.push_back(weight);
   }
   
   HSSInfo info(nodes, rows, cols, weights);
