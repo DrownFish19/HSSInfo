@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <ostream>
+#include <sstream>
 
 #include "hssinfo.hpp"
 
