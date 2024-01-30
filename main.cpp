@@ -67,18 +67,17 @@ int main(int argc, char* argv[]) {
     std::stringstream ss(line); //使用string初始化stringstream
     int row;
     int col;
-    float weight=1.0;
+    float weight = 1.0;
     ss >> row;
     ss >> col;
     ss >> weight;
-    std::cout << row << " " << col << " " << weight << std::endl;
     rows.push_back(row);
     cols.push_back(col);
     weights.push_back(weight);
   }
 
   HSSInfo info(nodes, rows, cols, weights);
-
+  info.output_edge_info();
   gettimeofday(&t2, nullptr);
   timeuse = (float) (t2.tv_sec - t1.tv_sec) + (float) (t2.tv_usec - t1.tv_usec) / 1000000.0;
   std::cout << "init time = " << timeuse << std::endl; //输出时间（单位：ｓ）
@@ -98,4 +97,6 @@ int main(int argc, char* argv[]) {
       fout << std::endl;
     }
   }
+
+  info.output_node_info();
 }

@@ -62,8 +62,9 @@ public:
   thrust::host_vector<thrust::host_vector<int>> h_community; // nodes
   thrust::device_vector<int> d_comity_label;                 // nodes
 
-  thrust::device_vector<float> d_degree; // nodes
-  thrust::device_vector<float> d_loop;   // nodes
+  thrust::device_vector<float> d_degree_init; // nodes
+  thrust::device_vector<float> d_degree;      // nodes
+  thrust::device_vector<float> d_loop;        // nodes
 
   thrust::device_vector<bool> d_finished;       // edges
   thrust::device_vector<float> d_degree1;       // edges
@@ -121,6 +122,9 @@ public:
 
   template <typename T>
   void printf_bar(T edgeNum, T now);
+
+  void output_edge_info();
+  void output_node_info();
 };
 
 #endif // HSSINFO_HSSINFO_HPP

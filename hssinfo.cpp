@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <fstream>
 //#define debug
+#define output
 HSSInfo::HSSInfo(const int &nodes, const std::vector<int> rows, const std::vector<int> cols, const std::vector<float> weights) : nodes(nodes) {
   std::vector<std::vector<int>> src_locs;
   std::vector<std::vector<int>> tgt_locs;
@@ -52,6 +53,8 @@ HSSInfo::HSSInfo(const int &nodes, const std::vector<int> rows, const std::vecto
   h_comity_label.resize(this->nodes);
   thrust::sequence(h_comity_label.begin(), h_comity_label.end());
   thrust::copy(h_comity_label.begin(), h_comity_label.end(), this->d_comity_label.begin());
+  // save for output last result
+  this->d_degree_init.insert(this->d_degree_init.begin(), degree.begin(), degree.end());
 
   this->d_degree.insert(this->d_degree.begin(), degree.begin(), degree.end());
   this->d_loop.insert(this->d_loop.begin(), loop.begin(), loop.end());
@@ -81,6 +84,8 @@ HSSInfo::HSSInfo(const int &nodes, const std::vector<int> rows, const std::vecto
     this->h_src_locs[idx] = thrust::host_vector<int>(src_locs[idx].begin(), src_locs[idx].end());
     this->h_tgt_locs[idx] = thrust::host_vector<int>(tgt_locs[idx].begin(), tgt_locs[idx].end());
   }
+
+  thrust::transform(this->d_degree_init.begin(), this->d_degree_init.end(), this->d_loop.begin(), this->d_degree_init.begin(), thrust::minus<float>());
 
   thrust::transform(this->d_degree.begin(), this->d_degree.end(), this->d_loop.begin(), this->d_degree.begin(), thrust::minus<float>());
   thrust::device_vector<float> d_degree_loop(this->nodes);
@@ -455,4 +460,59 @@ void HSSInfo::printf_bar(T edgeNum, T now) {
   printf("\rProcessing => [%.2f%%]  %d / %d:", perc, now, edgeNum);
   //  for (int j = 1; j <= perc; j++) { printf("█"); }
   fflush(stdout);
+}
+
+void HSSInfo::output_edge_info() {
+#ifdef output
+  std::ofstream fout_edge;
+  fout_edge.open("edge_entropy.txt", std::ios::out | std::ios::ate);
+  for (auto src_index = this->d_src_idx.cbegin(); src_index < this->d_src_idx.cend(); src_index++) {
+    int src_id  = *src_index;
+    int tgt_id  = *(this->d_tgt_idx.cbegin() + (src_index - this->d_src_idx.cbegin()));
+    float delta = *(this->d_entropy_delta.cbegin() + (src_index - this->d_src_idx.cbegin()));
+    fout_edge << "src_id: " << src_id << " ";
+    fout_edge << "tgt_id: " << tgt_id << " ";
+    fout_edge << "delta: " << delta << " ";
+    fout_edge << std::endl;
+  }
+#endif
+}
+
+void HSSInfo::output_node_info() {
+#ifdef output
+  std::ofstream fout_node, fout_cmty;
+  fout_node.open("node_entropy.txt", std::ios::out | std::ios::ate);
+  fout_cmty.open("cmty_entropy.txt", std::ios::out | std::ios::ate);
+
+  for (auto i = 0; i < this->h_community.size(); i++) {
+    if (!this->h_community[i].empty()) {
+      float community_entropy = 0.0;
+      int community_label     = this->d_comity_label[*this->h_community[i].cbegin()];
+      float community_degree  = this->d_degree[community_label];
+
+      for (auto index = this->h_community[i].cbegin(); index < this->h_community[i].cend(); index++) {
+        int node_id       = *index;
+        float node_degree = this->d_degree_init[node_id];
+
+        float node_entropy = -node_degree / community_degree * log2(node_degree / community_degree);
+        community_entropy += community_degree / this->degree_sum * node_entropy;
+
+        fout_node << "node_id: " << node_id << " ";
+        fout_node << "cmty_label: " << community_label << " ";
+        fout_node << "node_degree: " << node_degree << " ";
+        fout_node << "node_entropy: " << node_entropy << " ";
+        fout_node << std::endl;
+      }
+      float community_outer = community_degree - this->d_loop[community_label];
+      community_entropy += -community_outer / this->degree_sum * log2(community_degree / this->degree_sum);
+      fout_cmty << "cmty_label: " << community_label << " ";
+      fout_cmty << "community_degree: " << community_degree << " ";
+      fout_cmty << "community_outer: " << community_outer << " ";
+      fout_cmty << "community_entropy: " << community_entropy << " ";
+      fout_cmty << std::endl;
+    }
+  }
+  fout_node.close();
+  fout_cmty.close();
+#endif
 }
