@@ -2,6 +2,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <fstream>
 #include <iostream>
 #include <ostream>
 
@@ -58,7 +59,25 @@ int main(int argc, char* argv[]) {
   double timeuse;
   gettimeofday(&t1, nullptr);
 
-  HSSInfo info(nodes, filename);
+  std::vector<int> rows, cols;
+  std::vector<float> weights;
+  std::ifstream in(filename);
+  std::string line;
+  while (getline(in, line)) {   //将in文件中的每一行字符读入到string line中
+    std::stringstream ss(line); //使用string初始化stringstream
+    int row;
+    int col;
+    float weight=1.0;
+    ss >> row;
+    ss >> col;
+    ss >> weight;
+    std::cout << row << " " << col << " " << weight << std::endl;
+    rows.push_back(row);
+    cols.push_back(col);
+    weights.push_back(weight);
+  }
+
+  HSSInfo info(nodes, rows, cols, weights);
 
   gettimeofday(&t2, nullptr);
   timeuse = (float) (t2.tv_sec - t1.tv_sec) + (float) (t2.tv_usec - t1.tv_usec) / 1000000.0;
@@ -71,5 +90,12 @@ int main(int argc, char* argv[]) {
   timeuse = (float) (t3.tv_sec - t2.tv_sec) + (float) (t3.tv_usec - t2.tv_usec) / 1000000.0;
   std::cout << std::endl << "community detection time = " << timeuse << std::endl; //输出时间（单位：ｓ）
 
-  info.output_clusters(filename_output);
+  std::ofstream fout;
+  fout.open(filename_output, std::ios::out | std::ios::ate);
+  for (auto i = 0; i < info.h_community.size(); i++) {
+    if (!info.h_community[i].empty()) {
+      for (auto index = info.h_community[i].cbegin(); index < info.h_community[i].cend(); index++) { fout << *index << " "; }
+      fout << std::endl;
+    }
+  }
 }
