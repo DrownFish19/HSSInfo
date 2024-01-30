@@ -1,26 +1,39 @@
 cmake_minimum_required(VERSION 3.21)
 
+project(HSSInfo)
 set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CUDA_STANDARD 14)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0")
 
-set(CUB_DIR "/usr/local/cuda/targets/x86_64-linux/lib/cmake/cub")
-set(Thrust_DIR "/usr/local/cuda/targets/x86_64-linux/lib/cmake/thrust")
-set(THRUST_ENABLE_COMPUTE_80 ON)
-set(THRUST_INCLUDE_CUB_CMAKE ON)
-set(THRUST_INSTALL_CUB_HEADERS ON)
-set(THRUST_ENABLE_COMPUTE_FUTURE ON)
+# download CPM.cmake
+set(CPM_DOWNLOAD_VERSION 0.34.0)
+if(CPM_SOURCE_CACHE)
+  set(CPM_DOWNLOAD_LOCATION "${CPM_SOURCE_CACHE}/cpm/CPM_${CPM_DOWNLOAD_VERSION}.cmake")
+elseif(DEFINED ENV{CPM_SOURCE_CACHE})
+  set(CPM_DOWNLOAD_LOCATION "$ENV{CPM_SOURCE_CACHE}/cpm/CPM_${CPM_DOWNLOAD_VERSION}.cmake")
+else()
+  set(CPM_DOWNLOAD_LOCATION "${CMAKE_BINARY_DIR}/cmake/CPM_${CPM_DOWNLOAD_VERSION}.cmake")
+endif()
 
-# for Linux CUDA (only)
-project(HSSInfo LANGUAGES CXX CUDA)
+if(NOT (EXISTS ${CPM_DOWNLOAD_LOCATION}))
+  message(STATUS "Downloading CPM.cmake to ${CPM_DOWNLOAD_LOCATION}")
+  file(DOWNLOAD
+       https://github.com/cpm-cmake/CPM.cmake/releases/download/v${CPM_DOWNLOAD_VERSION}/CPM.cmake
+       ${CPM_DOWNLOAD_LOCATION}
+  )
+endif()
 
-find_package(CUDA REQUIRED)
-find_package(CUB REQUIRED CONFIG)
-find_package(Thrust REQUIRED CONFIG)
-thrust_create_target(ThrustCUDA HOST CPP DEVICE CUDA)
+# include 
+include(${CPM_DOWNLOAD_LOCATION})
 
-add_executable(HSSInfo
-        main.cu
-        hssinfo.cu)
-target_link_libraries(HSSInfo ThrustCUDA)
+CPMAddPackage(
+    NAME THRUST
+    GITHUB_REPOSITORY nvidia/thrust
+    GIT_TAG 2.1.0
+)
+
+set(THRUST_HOST_SYSTEM CPP)
+set(THRUST_DEVICE_SYSTEM CPP)
+thrust_create_target(ThrustCPP HOST CPP DEVICE CPP)
+add_executable(HSSInfo main.cpp hssinfo.cpp)
+target_link_libraries(HSSInfo ThrustCPP)
